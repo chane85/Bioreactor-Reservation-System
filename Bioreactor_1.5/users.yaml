@@ -1,0 +1,23 @@
+# Bioreactor Manager — User Database
+# -----------------------------------------------------------
+# Bootstrap admin: username='admin', password='changeme123'
+# !!! ROTATE THIS PASSWORD IMMEDIATELY AFTER FIRST LOGIN !!!
+# Use:  python add_user.py update
+# -----------------------------------------------------------
+# Roles:
+#   viewer  — implicit (anyone not logged in); has no entry here
+#   editor  — can access Reservation, Simulation
+#   admin   — can access all pages including Admin
+# -----------------------------------------------------------
+# Password storage: PBKDF2-SHA256, 200,000 iterations.
+# Format: pbkdf2_sha256$<iters>$<salt_hex>$<hash_hex>
+
+credentials:
+  usernames:
+    admin:
+      email: admin@example.com
+      first_name: Admin
+      last_name: User
+      password: pbkdf2_sha256$200000$951e1f5d4250563362cc3aed4a4beadd$ec47c788e14b9c674e77c1a5d410fd6f98dbb8b92f5dfcb268301eb9bae21995
+      roles:
+        - admin
