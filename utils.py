@@ -218,17 +218,17 @@ def get_method_options_for_scale(scale):
     }
     return method_map.get(scale, ['Fed-batch'])
 
-def get_vessel_count(reactor_id):
+def get_vessel_count(reactor_id, vessels_used=None):
     """
     Returns the number of physical vessels represented by one booking row.
-    Ambr15 stations represent 12 mini-bioreactors each (operational unit).
+    If vessels_used is provided (user-specified), use that value.
+    Ambr15 stations default to 12 mini-bioreactors if not specified.
     All other reactor types represent 1 vessel per booking row.
     """
-    if pd.isna(reactor_id):
-        return 1
-    parts = str(reactor_id).split('-')
-    # Ambr15 station IDs: 'Ambr15-EQ00000257-S1' (suffix starts with 'S')
+    parts = reactor_id.split('-')
     if len(parts) >= 3 and parts[0] == 'Ambr15' and parts[-1].startswith('S'):
+        if vessels_used is not None and not pd.isna(vessels_used):
+            return int(vessels_used)
         return 12
     return 1
 
@@ -336,7 +336,7 @@ def calculate_monthly_costs(start_date, end_date, bookings_df, cost_matrix):
     return results
 
 # --- AVAILABILITY CHECK ---
-def check_availability(reactor_id, start_date, end_date, bookings):
+def check_availability(reactor_id, start_date, end_date, bookings, allow_same_day=True):
     if bookings.empty: return True
     check_start = pd.to_datetime(start_date)
     check_end = pd.to_datetime(end_date)
@@ -348,7 +348,14 @@ def check_availability(reactor_id, start_date, end_date, bookings):
     subset['end'] = pd.to_datetime(subset['end'], errors='coerce')
    
     overlap = subset[(subset['start'] < check_end) & (subset['end'] > check_start)]
-    return overlap.empty
+    if not overlap.empty: return False
+
+    if not allow_same_day:
+        buffer_end = check_start + pd.Timedelta(days=1)
+        too_close = subset[subset['end'] >= check_start]
+        if not too_close.empty: return False
+
+    return True
 
 def custom_sort_key(reactor_id):
     parts = reactor_id.split('-')
@@ -506,10 +513,34 @@ def create_gantt_chart(reactors, reactor_y_map, bookings_df, extra_shapes=None, 
                 sx.append(mid); sy.append(y); stxt.append(f"{row['project']} ({days}d)"); sc.append(fc)
                 sho.append(f"<b>{row['project']}</b><br>User: {row['user']}<br>{row['start'].date()} ~ {row['end'].date()}<br>({days} Days)")
                
+    # Build set of (reactor_id, date) that are occupied by a booking
+    occupied = set()
+    if not bookings_df.empty:
+        for _, brow in bookings_df.iterrows():
+            if brow['reactor_id'] not in reactor_y_map: continue
+            _bs = pd.to_datetime(brow['start']).date()
+            _be = pd.to_datetime(brow['end']).date()
+            _d = _bs
+            while _d <= _be:
+                occupied.add((brow['reactor_id'], _d))
+                _d += datetime.timedelta(days=1)
+
+    grid_x, grid_y, grid_hover = [], [], []
+    _g_curr = v_start
+    while _g_curr <= v_end:
+        _g_date = _g_curr.date() if hasattr(_g_curr, 'date') else _g_curr
+        _g_date_str = _g_curr.strftime("%Y-%m-%d (%a)")
+        for _rid in reactors:
+            if (_rid, _g_date) not in occupied:
+                grid_x.append(_g_curr)
+                grid_y.append(reactor_y_map[_rid])
+                grid_hover.append(f"<b>{_rid}</b><br>{_g_date_str}")
+        _g_curr += datetime.timedelta(days=1)
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=[v_start, v_end], y=[-1, -1], xaxis="x2", mode="markers", marker=dict(opacity=0), showlegend=False, hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=grid_x, y=grid_y, mode="markers", marker=dict(opacity=0, size=8), hovertext=grid_hover, hoverinfo="text", showlegend=False))
     if sx: fig.add_trace(go.Scatter(x=sx, y=sy, text=stxt, mode="text", textposition="middle center", textfont=dict(color=sc, size=13, family="Arial Black"), hovertext=sho, hoverinfo="text"))
-   
     for ann in annotations: fig.add_annotation(ann)
     fig.add_vline(x=datetime.datetime.now().timestamp()*1000, line_width=2, line_color="#FF4B4B")
     if highlight_date:
