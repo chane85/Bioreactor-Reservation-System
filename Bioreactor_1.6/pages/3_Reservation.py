@@ -290,7 +290,7 @@ with tab_bio:
                 elif not all_valid:
                     st.error("⚠️ Select all reactors")
                 else:
-                    bid = str(int(datetime.datetime.now().timestamp()))
+                    bid = str(uuid.uuid4().hex[:12])
                     rows = []
                     for i, step in enumerate(st.session_state.campaign_plan):
                         for u_idx, unit in enumerate(sels[i]):
@@ -484,7 +484,7 @@ with tab_ambr:
             if not ambr_proj or not ambr_sme: st.error("⚌ Fill Product & SME Name")
             elif not all_valid: st.error("⚌ Fix selection errors")
             else:
-                bid = str(int(datetime.datetime.now().timestamp()))
+                bid = str(uuid.uuid4().hex[:12])
                 new_rows = []
                 for item in final_booking_data:
                     for unit in item['vessels']:

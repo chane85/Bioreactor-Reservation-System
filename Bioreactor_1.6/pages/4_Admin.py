@@ -382,7 +382,7 @@ else:
                         action='restored',
                         filename=selected_backup,
                         submitted_by='',
-                        actioned_by='Admin'
+                        actioned_by=auth.current_user()
                     )
                     st.session_state.bookings = utils.load_data()
                     st.success(f"✅ Restored {n} booking(s) from {selected_backup}")

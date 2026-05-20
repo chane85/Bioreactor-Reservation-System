@@ -4,6 +4,7 @@ import datetime
 import plotly.graph_objects as go
 import os
 import re
+import shutil
 
 # --- CONFIGURATION ---
 DATA_FILE = "Bioreactor_reservation.csv"
@@ -309,7 +310,8 @@ def calculate_monthly_costs(start_date, end_date, bookings_df, cost_matrix):
     """
     if bookings_df.empty or cost_matrix.empty:
         return []
-   
+
+    bookings_df = bookings_df.copy()
     # Filter bookings by date range
     bookings_df['start'] = pd.to_datetime(bookings_df['start'])
     bookings_df['end'] = pd.to_datetime(bookings_df['end'])
@@ -665,7 +667,7 @@ def apply_simulation_diff(filename, actioned_by):
 
     # Move to applied folder
     applied_path = os.path.join(SIM_APPLIED_DIR, filename)
-    os.rename(filepath, applied_path)
+    shutil.move(filepath, applied_path)
 
     return n_added, n_removed
 
@@ -688,6 +690,7 @@ def create_backup():
     while len(all_backups) > MAX_BACKUPS:
         oldest = os.path.join(SIM_BACKUP_DIR, all_backups.pop(0))
         os.remove(oldest)
+    return filename
 
 def load_backups():
     """

@@ -12,12 +12,13 @@ Never paste plaintext passwords into the YAML directly.
 """
 import sys
 import getpass
+import os
 import yaml
 
 # Reuse hash_password from auth.py — same module, same algo guaranteed
 from auth import hash_password
 
-USERS_FILE = "users.yaml"
+USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.yaml")
 VALID_ROLES = ['viewer', 'editor', 'admin']
 
 
