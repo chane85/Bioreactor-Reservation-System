@@ -115,10 +115,22 @@ with tab2:
     if start_date > end_date:
         st.error("⚌ 시작 일자는 종료 일자보다 앞의 일자를 선택해야합니다.")
     else:
+        # Filter bookings by date range once; reuse for both summary and export
+        filtered_bookings = st.session_state.bookings.copy()
+        if not filtered_bookings.empty:
+            filtered_bookings['start'] = pd.to_datetime(filtered_bookings['start'])
+            filtered_bookings['end'] = pd.to_datetime(filtered_bookings['end'])
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date)
+            filtered_bookings = filtered_bookings[
+                (filtered_bookings['start'] <= end_dt) &
+                (filtered_bookings['end'] >= start_dt)
+            ]
+
         monthly_data = utils.calculate_monthly_costs(
-            start_date, 
-            end_date, 
-            st.session_state.bookings, 
+            start_date,
+            end_date,
+            filtered_bookings,
             st.session_state.cost_matrix
         )
         
@@ -148,7 +160,7 @@ with tab2:
             for project_info in monthly_data:
                 cost_details = utils.calculate_project_cost(
                     project_info['project'],
-                    st.session_state.bookings,
+                    filtered_bookings,
                     st.session_state.cost_matrix
                 )
                 for item in cost_details['breakdown']:

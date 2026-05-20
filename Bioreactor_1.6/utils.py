@@ -8,7 +8,6 @@ import shutil
 
 # --- CONFIGURATION ---
 DATA_FILE = "Bioreactor_reservation.csv"
-COST_FILE = "배치_단가.csv"
 ADMIN_PASSWORD = "bio135"
 
 # --- COLORS ---
@@ -137,46 +136,6 @@ def generate_inventory():
     return pd.DataFrame(inventory_list)
 
 # --- COST FUNCTIONS ---
-def load_cost_matrix():
-    """Load cost data from CSV file"""
-    if not os.path.exists(COST_FILE):
-        st.warning(f"⚠️ Cost file '{COST_FILE}' not found. Cost calculations will be unavailable.")
-        return pd.DataFrame(columns=['scale', 'method', 'cost'])
-   
-    try:
-        # Try multiple encodings
-        encodings = ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr', 'latin1', 'iso-8859-1']
-        df = None
-       
-        for encoding in encodings:
-            try:
-                df = pd.read_csv(COST_FILE, encoding=encoding)
-                break
-            except (UnicodeDecodeError, LookupError):
-                continue
-       
-        if df is None:
-            st.error(f"Could not read {COST_FILE} with any known encoding")
-            return pd.DataFrame(columns=['scale', 'method', 'cost'])
-       
-        # Ensure column names are correct
-        if 'Scale' in df.columns:
-            df = df.rename(columns={'Scale': 'scale'})
-        if 'Method' in df.columns:
-            df = df.rename(columns={'Method': 'method'})
-        if 'Cost' in df.columns:
-            df = df.rename(columns={'Cost': 'cost'})
-       
-        # Clean data - REMOVE ALL SPACES
-        df['scale'] = df['scale'].astype(str).str.strip().str.replace(' ', '')
-        df['method'] = df['method'].astype(str).str.strip().str.replace(' ', '')
-        df['cost'] = pd.to_numeric(df['cost'], errors='coerce')
-       
-        return df.dropna(subset=['scale', 'method', 'cost'])
-    except Exception as e:
-        st.error(f"Error loading cost file: {e}")
-        return pd.DataFrame(columns=['scale', 'method', 'cost'])
-
 def get_cost_for_scale_method(scale, method, cost_matrix):
     """Get unit cost for a specific scale-method combination"""
     if cost_matrix.empty:
