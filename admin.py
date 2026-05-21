@@ -17,14 +17,14 @@ st.caption(f"Logged in as **{auth.current_user()}** (admin role). "
            "Some destructive actions require an additional password (2nd factor).")
 
 # --- AUTHENTICATION (2nd factor for destructive actions) ---
-if 'admin_auth' not in st.session_state: 
+if 'admin_auth' not in st.session_state:
     st.session_state.admin_auth = False
 
 if not st.session_state.admin_auth:
     with st.form("login_form"):
         pwd = st.text_input("2nd-factor password (required for destructive actions)", type="password")
         submitted = st.form_submit_button("Unlock destructive actions")
-        
+       
         if submitted:
             if pwd == "bio135":
                 st.session_state.admin_auth = True
@@ -32,47 +32,39 @@ if not st.session_state.admin_auth:
             else:
                 st.error("❌ Incorrect password")
 else:
-    # ✅ RIGHT HERE - Add these 3 lines
     if 'bookings' not in st.session_state:
         st.session_state.bookings = utils.load_data()
-    
+   
     if st.button("Log Out"):
         st.session_state.admin_auth = False
         st.rerun()
-   
+  
     st.divider()
 
-    # =============================================================
-    # TABS: Bookings | Backup | Bulk Import
-    # =============================================================
     tab1, tab2, tab3 = st.tabs(["📋 Bookings", "💾 Backup", "📊 Bulk Import"])
 
-    # -------------------------------------------------------------
-    # TAB 1: BOOKINGS — Manage Bookings
-    # -------------------------------------------------------------
     with tab1:
-        # --- MANAGE BOOKINGS ---
         st.subheader("📋 Manage Bookings")
-        
-        if 'inventory' not in st.session_state: 
+       
+        if 'inventory' not in st.session_state:
             st.session_state.inventory = utils.generate_inventory()
 
         df = st.session_state.get('bookings', utils.load_data())
-        
+       
         if not df.empty:
             view = df.copy()
             view['start'] = pd.to_datetime(view['start'])
             view['end'] = pd.to_datetime(view['end'])
-            
+           
             inv_map = st.session_state.inventory.set_index('id')['scale'].to_dict()
             view['scale'] = view['reactor_id'].map(inv_map)
-            
+           
             if 'method' not in view.columns:
                 view['method'] = 'Unknown'
             view['method'] = view['method'].fillna('Unknown')
 
             fc1, fc2, fc3, fc4 = st.columns(4)
-            
+           
             f_proj = fc1.selectbox("Filter Project", ["All"] + sorted(view['project'].astype(str).unique()))
             scale_opts = ["All"] + sorted(list(set([s for s in inv_map.values() if pd.notna(s)])))
             f_scale = fc2.selectbox("Filter Scale", scale_opts)
@@ -80,8 +72,8 @@ else:
             f_method = fc3.selectbox("Filter Method", method_opts)
             use_date = fc4.checkbox("Filter by Start Date")
             f_date = fc4.date_input("Select Date", value=None, disabled=not use_date)
-           
-            if f_proj != "All": 
+          
+            if f_proj != "All":
                 view = view[view['project'] == f_proj]
             if f_scale != "All":
                 view = view[view['scale'] == f_scale]
@@ -89,8 +81,7 @@ else:
                 view = view[view['method'] == f_method]
             if use_date and f_date:
                 view = view[view['start'].dt.date == f_date]
-               
-            # Select All checkbox for mass deletion
+              
             select_all = st.checkbox(
                 f"☑️ Select All ({len(view)} rows shown) — check to mark all for deletion",
                 value=False, key="select_all_delete"
@@ -129,7 +120,7 @@ else:
                         st.rerun()
                     else:
                         st.warning("No rows selected for deletion.")
-            
+           
             with col2:
                 if st.button("💾 Save Changes", type="primary"):
                     edited_clean = edited.drop(columns=['Delete'])
@@ -138,19 +129,19 @@ else:
                         for col in edited_clean.columns:
                             if col in df.columns:
                                 df.loc[df['booking_id'] == booking_id, col] = row[col]
-                    
+                   
                     st.session_state.bookings = df
                     utils.save_data(df)
                     st.cache_data.clear()
                     st.success("✅ Changes saved successfully!")
                     st.rerun()
-            
+           
             unknown_count = (final_view['method'] == 'Unknown').sum()
             if unknown_count > 0:
                 st.warning(f"⚠️ {unknown_count} bookings have 'Unknown' method. Please assign methods for accurate cost calculation.")
         else:
             st.info("No bookings found.")
-            
+           
         # =============================================================
         # FIX / CALIBRATION BLOCKS
         # =============================================================
@@ -165,7 +156,6 @@ else:
             if 'inventory' not in st.session_state:
                 st.session_state.inventory = utils.generate_inventory()
 
-            # ── Create new block ────────────────────────────────────
             st.markdown("#### Create New Block")
             blk_c1, blk_c2 = st.columns(2)
             with blk_c1:
@@ -193,32 +183,184 @@ else:
                 key="blk_category",
             )
             all_ids = st.session_state.inventory['id'].tolist()
-            if blk_category == "Bioreactor":
-                filtered_ids = sorted([r for r in all_ids if not r.startswith("Ambr")], key=utils.custom_sort_key)
-            elif blk_category == "Ambr250":
-                filtered_ids = sorted([r for r in all_ids if r.startswith("Ambr250")])
-            else:  # Ambr15
-                filtered_ids = sorted([r for r in all_ids if r.startswith("Ambr15")])
 
-            blk_reactors = st.multiselect(
-                f"Select {blk_category}(s) to Block",
-                filtered_ids,
-                key=f"blk_reactors_{blk_category}",
-                help="One block will be created per selected reactor.",
-            )
+            # Initialize pending blocks queue (persists across category switches)
+            if 'pending_blocks' not in st.session_state:
+                st.session_state.pending_blocks = []  # list of dicts: {reactor_id, is_vessel}
+
+            if blk_category == "Bioreactor":
+                bio_ids = [r for r in all_ids if not r.startswith("Ambr")]
+                floors = sorted(set(r.split("-")[0] for r in bio_ids))
+               
+                col_f, col_s, col_n = st.columns(3)
+                with col_f:
+                    sel_floor = st.selectbox("Floor", floors, key="bio_sel_floor")
+               
+                scales_in_floor = sorted(
+                    set(r.split("-")[1] for r in bio_ids if r.split("-")[0] == sel_floor),
+                    key=lambda s: {"5L":1,"2L":2,"10L":3,"50L":4,"200L":5,"Wave":6}.get(s, 99)
+                )
+                with col_s:
+                    sel_scale = st.selectbox("Scale", scales_in_floor, key="bio_sel_scale")
+               
+                nums_in_scope = sorted(
+                    [r.split("-", 2)[2] for r in bio_ids
+                     if r.split("-")[0] == sel_floor and r.split("-")[1] == sel_scale]
+                )
+                # Apply "select all" trigger BEFORE rendering the multiselect
+                if st.session_state.get("bio_select_all_trigger", False):
+                    st.session_state.bio_sel_num = nums_in_scope
+                    st.session_state.bio_select_all_trigger = False
+                with col_n:
+                    sel_nums = st.multiselect("Number(s)", nums_in_scope, key="bio_sel_num")
+                if st.button("📌 Select All Numbers", key="bio_select_all"):
+                    st.session_state.bio_select_all_trigger = True
+                    st.rerun()
+               
+                candidate_rids = [f"{sel_floor}-{sel_scale}-{n}" for n in sel_nums]
+                candidate_is_vessel = False
+           
+            elif blk_category == "Ambr250":
+                ambr250_ids = [r for r in all_ids if r.startswith("Ambr250")]
+                eqs = sorted(set(r.split("-")[1] for r in ambr250_ids))
+               
+                col_e, col_v = st.columns(2)
+                with col_e:
+                    sel_eq = st.selectbox("EQ Number", eqs, key="a250_sel_eq")
+               
+                vessels_in_eq = sorted(
+                    [r.split("-")[2] for r in ambr250_ids if r.split("-")[1] == sel_eq]
+                )
+                if st.session_state.get("a250_select_all_trigger", False):
+                    st.session_state.a250_sel_vessel = vessels_in_eq
+                    st.session_state.a250_select_all_trigger = False
+                with col_v:
+                    sel_vessels = st.multiselect("Vessel Number(s)", vessels_in_eq, key="a250_sel_vessel")
+                if st.button("📌 Select All Vessels", key="a250_select_all"):
+                    st.session_state.a250_select_all_trigger = True
+                    st.rerun()
+               
+                candidate_rids = [f"Ambr250-{sel_eq}-{v}" for v in sel_vessels]
+                candidate_is_vessel = False
+           
+            else:  # Ambr15 — vessel-level blocking
+                ambr15_ids = [r for r in all_ids if r.startswith("Ambr15")]
+                eqs = sorted(set(r.split("-")[1] for r in ambr15_ids))
+               
+                st.info("💡 Ambr15 blocks are vessel-level. Station can still be reserved; "
+                        "only blocked vessels are excluded from cost calculation.")
+               
+                col_e, col_st, col_v = st.columns(3)
+                with col_e:
+                    sel_eq = st.selectbox("EQ Number", eqs, key="a15_sel_eq")
+               
+                stations_in_eq = sorted(
+                    [r.split("-")[2] for r in ambr15_ids if r.split("-")[1] == sel_eq]
+                )
+                with col_st:
+                    sel_station = st.selectbox("Station", stations_in_eq, key="a15_sel_station")
+               
+                vessel_labels = [f"V{v:02d}" for v in range(1, 13)]
+                if st.session_state.get("a15_select_all_trigger", False):
+                    st.session_state.a15_sel_vessel = vessel_labels
+                    st.session_state.a15_select_all_trigger = False
+                with col_v:
+                    sel_vessels = st.multiselect("Vessel Number(s)", vessel_labels, key="a15_sel_vessel")
+                if st.button("📌 Select All Vessels (V01–V12)", key="a15_select_all"):
+                    st.session_state.a15_select_all_trigger = True
+                    st.rerun()
+               
+                candidate_rids = [f"Ambr15-{sel_eq}-{sel_station}-{v}" for v in sel_vessels]
+                candidate_is_vessel = True
+
+            # Add-to-queue button (with mixed-category guard)
+            add_col1, add_col2 = st.columns([1, 3])
+            with add_col1:
+                if st.button("➕ Add to Block List", key="add_to_pending"):
+                    if not candidate_rids:
+                        st.warning("⚠️ Select at least one reactor/vessel first.")
+                    else:
+                        # Guard 2: prevent mixing vessel + station blocks in one batch
+                        # (runs ONCE upfront, fail-fast — don't add half then error)
+                        if st.session_state.pending_blocks:
+                            queue_is_vessel = st.session_state.pending_blocks[0]['is_vessel']
+                            if queue_is_vessel != candidate_is_vessel:
+                                queue_type = "vessel-level (Ambr15)" if queue_is_vessel else "station-level (Bioreactor/Ambr250)"
+                                new_type = "vessel-level (Ambr15)" if candidate_is_vessel else "station-level (Bioreactor/Ambr250)"
+                                st.error(
+                                    f"❌ Cannot mix block types. Current queue is **{queue_type}**, "
+                                    f"but you're trying to add **{new_type}** blocks. "
+                                    f"Submit the current batch first, or clear the queue."
+                                )
+                                st.stop()
+                       
+                        # Guard 1: dedup per-item
+                        existing_ids = {b['reactor_id'] for b in st.session_state.pending_blocks}
+                        added, skipped = 0, []
+                        for rid in candidate_rids:
+                            if rid in existing_ids:
+                                skipped.append(rid)
+                            else:
+                                st.session_state.pending_blocks.append({
+                                    'reactor_id': rid,
+                                    'is_vessel': candidate_is_vessel,
+                                })
+                                added += 1
+                        if skipped:
+                            st.warning(f"⚠️ Skipped {len(skipped)} already-queued item(s): {', '.join(skipped)}")
+                        if added:
+                            st.rerun()
+            with add_col2:
+                if candidate_rids:
+                    preview = ', '.join(candidate_rids[:3]) + (f" ... (+{len(candidate_rids)-3} more)" if len(candidate_rids) > 3 else "")
+                    st.caption(f"Selected ({len(candidate_rids)}): **{preview}**")
+                else:
+                    st.caption("No selection yet.")
+
+            # Show pending list + remove UI
+            if st.session_state.pending_blocks:
+                st.markdown("##### 📝 Pending Blocks")
+                pending_df = pd.DataFrame(st.session_state.pending_blocks)
+                pending_df['Type'] = pending_df['is_vessel'].map({True: 'Vessel', False: 'Station'})
+                st.dataframe(
+                    pending_df[['reactor_id', 'Type']].rename(columns={'reactor_id': 'Reactor / Vessel'}),
+                    use_container_width=True, hide_index=True
+                )
+                rm_col1, rm_col2, rm_col3 = st.columns([3, 1, 1])
+                with rm_col1:
+                    to_remove = st.multiselect(
+                        "Remove from list",
+                        [b['reactor_id'] for b in st.session_state.pending_blocks],
+                        key="remove_pending"
+                    )
+                with rm_col2:
+                    st.write("")
+                    if st.button("🗑️ Remove", key="remove_pending_btn"):
+                        st.session_state.pending_blocks = [
+                            b for b in st.session_state.pending_blocks if b['reactor_id'] not in to_remove
+                        ]
+                        st.rerun()
+                with rm_col3:
+                    st.write("")
+                    if st.button("🧹 Clear All", key="clear_pending_btn"):
+                        st.session_state.pending_blocks = []
+                        st.rerun()
+
+            # Wire pending_blocks → existing block-creation logic
+            blk_reactors = [b['reactor_id'] for b in st.session_state.pending_blocks]
+            # Guard 2 above guarantees homogeneous queue, so any() == all()
+            is_vessel_block = any(b['is_vessel'] for b in st.session_state.pending_blocks)
 
             if blk_start and blk_end and blk_end < blk_start:
                 st.error("⚠️ End date must be on or after start date.")
             elif blk_reactors and blk_reason and blk_start and blk_end:
                 current_bookings = st.session_state.get('bookings', utils.load_data())
-                
+               
                 if is_vessel_block:
-                    # Vessel blocks don't conflict with station bookings — no pre-check needed
                     st.info(f"✅ {len(blk_reactors)} vessel block(s) will be created. "
                             f"Station bookings remain unaffected.")
                     conflicts = []
                 else:
-                    # Pre-validate conflicts (for warning display only — no Skip option)
                     conflicts = []
                     for rid in blk_reactors:
                         if not utils.check_availability(rid, blk_start, blk_end, current_bookings):
@@ -236,7 +378,6 @@ else:
                     bid_ts = str(int(datetime.datetime.now().timestamp()))
                     bookings_df = current_bookings.copy()
 
-                    # Auto-backup before any destructive change
                     backup_filename = None
                     if conflicts:
                         try:
@@ -245,7 +386,6 @@ else:
                             st.error(f"❌ Backup failed — block creation aborted to protect data: {e}")
                             st.stop()
 
-                    # Delete conflicting bookings within the date range
                     deleted_n = 0
                     if conflicts:
                         mask = (
@@ -256,8 +396,6 @@ else:
                         deleted_n = int(mask.sum())
                         bookings_df = bookings_df[~mask]
 
-                    # Create one block per selected reactor
-                    # VBLOCK_ prefix for vessel-level (Ambr15), BLOCK_ for station-level
                     prefix = "VBLOCK" if is_vessel_block else "BLOCK"
                     stage_label = "VesselBlock" if is_vessel_block else "Block"
                     new_blocks = []
@@ -277,7 +415,6 @@ else:
                     st.session_state.bookings = bookings_df
                     utils.save_data(bookings_df)
 
-                    # Audit log entry
                     try:
                         utils.log_audit(
                             action='block_created',
@@ -291,12 +428,12 @@ else:
                     msg = f"✅ Created {len(new_blocks)} block(s) — reason: {blk_reason}"
                     if deleted_n:
                         msg += f" (deleted {deleted_n} conflicting booking(s); backup saved as {backup_filename})"
+                    st.session_state.pending_blocks = []  # clear queue after successful create
                     st.success(msg)
                     st.rerun()
 
             st.divider()
 
-            # ── View / Clear existing blocks ────────────────────────
             st.markdown("#### Active Blocks")
             current_bookings_view = st.session_state.get('bookings', utils.load_data())
             if current_bookings_view.empty:
@@ -306,7 +443,6 @@ else:
                     current_bookings_view['booking_id'].astype(str).str.startswith('BLOCK_') |
                     current_bookings_view['booking_id'].astype(str).str.startswith('VBLOCK_')
                 ].copy()
-                # Add Type column for clarity
                 blocks_df['Type'] = blocks_df['booking_id'].astype(str).apply(
                     lambda b: 'Vessel' if b.startswith('VBLOCK_') else 'Station'
                 )
@@ -338,7 +474,6 @@ else:
                         st.session_state.bookings = bookings_df
                         utils.save_data(bookings_df)
 
-                        # Audit log for block clearance
                         try:
                             utils.log_audit(
                                 action='block_cleared',
@@ -353,23 +488,19 @@ else:
                         st.rerun()
 
         st.divider()
-        
-    # -------------------------------------------------------------
-    # TAB 2: BACKUP — Manual Export/Restore + Auto-Backups
-    # -------------------------------------------------------------
+       
     with tab2:
-        # --- 1. BACKUP / RESTORE (Manual) ---
         st.subheader("📤 Manual Export / Restore (CSV)")
         c1, c2 = st.columns(2)
         df = st.session_state.get('bookings', utils.load_data())
-       
+      
         c1.download_button(
-            "⬇️ Download Backup", 
-            df.to_csv(index=False).encode('utf-8'), 
-            "backup.csv", 
+            "⬇️ Download Backup",
+            df.to_csv(index=False).encode('utf-8'),
+            "backup.csv",
             "text/csv"
         )
-       
+      
         up = c2.file_uploader("Restore CSV", type=["csv"])
         if up and c2.button("⚠️ Restore Data"):
             try:
@@ -377,21 +508,20 @@ else:
                 ndf['start'] = pd.to_datetime(ndf['start'], format='mixed', errors='coerce')
                 ndf['end'] = pd.to_datetime(ndf['end'], format='mixed', errors='coerce')
                 ndf = ndf.dropna(subset=['start', 'end'])
-                
+               
                 if 'method' not in ndf.columns:
                     ndf['method'] = 'Unknown'
                 ndf['method'] = ndf['method'].fillna('Unknown')
-                
+               
                 st.session_state.bookings = ndf
                 utils.save_data(ndf)
                 st.success("✅ 복구 완료! (Restored successfully)")
                 st.rerun()
-            except Exception as e: 
+            except Exception as e:
                 st.error(f"Error restoring data: {e}")
 
         st.divider()
 
-        # --- 2. RESTORE BACKUP (Auto-generated) ---
         st.subheader("🔄 Auto-Backups (last 10)")
         st.caption("Restore real bookings to a previous snapshot. Last 10 backups are kept.")
 
@@ -426,10 +556,9 @@ else:
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Failed to restore: {e}")
-        
+       
         st.divider()
 
-        # --- AUDIT LOG ---
         st.subheader("📋 Audit Log")
         st.caption("Read-only record of all simulation submissions, applications, and restores.")
 
@@ -455,11 +584,7 @@ else:
                 st.success("✅ Audit entry deleted.")
                 st.rerun()
 
-    # -------------------------------------------------------------
-    # TAB 3: BULK IMPORT — Gantt CSV Import
-    # -------------------------------------------------------------
     with tab3:
-        # --- IMPORT FROM GANTT CSV ---
         st.subheader("📊 Import from Gantt Schedule CSV")
         st.caption("Upload preprocessed CSV from Excel Gantt chart (use excel_to_csv_preprocessor.py)")
 
@@ -467,15 +592,13 @@ else:
 
         if gantt_csv_upload:
             try:
-                # Read CSV
                 gantt_df = pd.read_csv(gantt_csv_upload)
-               
+              
                 st.success(f"✅ Loaded {len(gantt_df)} bookings from CSV")
-               
-                # Show preview
+              
                 st.write("**Preview of Gantt Data:**")
                 st.dataframe(gantt_df.head(10), use_container_width=True)
-               
+              
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("Total Bookings", len(gantt_df))
@@ -485,27 +608,23 @@ else:
                 with col3:
                     unique_projects = gantt_df['project'].nunique() if 'project' in gantt_df.columns else 0
                     st.metric("Projects", unique_projects)
-               
-                # Validate required columns
+              
                 required_cols = ['reactor_id', 'project', 'user', 'stage', 'method', 'start', 'end']
                 missing_cols = [col for col in required_cols if col not in gantt_df.columns]
-               
+              
                 if missing_cols:
                     st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
                 else:
-                    # Parse dates
                     gantt_df['start'] = pd.to_datetime(gantt_df['start'], errors='coerce')
                     gantt_df['end'] = pd.to_datetime(gantt_df['end'], errors='coerce')
-                   
-                    # Remove invalid rows
+                  
                     gantt_df = gantt_df.dropna(subset=['start', 'end'])
-                   
-                    # Generate booking IDs BEFORE data_editor
+                  
                     gantt_df['booking_id'] = [f"GANTT_{int(datetime.datetime.now().timestamp())}_{i}" for i in range(len(gantt_df))]
-                   
+                  
                     st.markdown("### 📋 Preview & Edit Before Import")
                     st.caption("Review and modify Stage/Method if needed")
-                   
+                  
                     edited_gantt_df = st.data_editor(
                         gantt_df,
                         hide_index=True,
@@ -530,35 +649,34 @@ else:
                         },
                         num_rows="fixed"
                     )
-                   
-                    # Validation
+                  
                     st.markdown("### 🔍 Validation")
-                   
+                  
                     validation_errors = []
-                   
+                  
                     if 'inventory' not in st.session_state:
                         st.session_state.inventory = utils.generate_inventory()
-                   
+                  
                     invalid_reactors = edited_gantt_df[~edited_gantt_df['reactor_id'].isin(st.session_state.inventory['id'])]
                     if not invalid_reactors.empty:
                         validation_errors.append(f"❌ Invalid reactor IDs: {invalid_reactors['reactor_id'].unique().tolist()}")
-                   
+                  
                     overlap_count = 0
                     for idx, row in edited_gantt_df.iterrows():
                         if not utils.check_availability(row['reactor_id'], row['start'].date(), row['end'].date(), st.session_state.bookings):
                             overlap_count += 1
-                   
+                  
                     if overlap_count > 0:
                         validation_errors.append(f"⚠️ {overlap_count} bookings have conflicts with existing schedule")
-                   
+                  
                     if validation_errors:
                         for error in validation_errors:
                             st.warning(error)
                     else:
                         st.success("✅ All validations passed")
-                   
+                  
                     col1, col2 = st.columns(2)
-                   
+                  
                     with col1:
                         import_mode = st.radio(
                             "Import Mode",
@@ -566,7 +684,7 @@ else:
                             help="Add: Keep existing bookings, append new ones | Replace: Delete all, use only CSV data",
                             key="gantt_import_mode"
                         )
-                   
+                  
                     with col2:
                         handle_conflicts = st.radio(
                             "If Conflicts Found",
@@ -574,7 +692,7 @@ else:
                             help="Skip: Don't import bookings with conflicts | Force: Delete conflicting bookings and import",
                             key="gantt_handle_conflicts"
                         )
-                   
+                  
                     if st.button("✅ Apply Gantt CSV Import", type="primary", use_container_width=True):
                         if import_mode == "Replace All Bookings":
                             st.session_state.bookings = pd.DataFrame(columns=["booking_id", "reactor_id", "user", "start", "end", "project", "stage", "method"])
@@ -583,7 +701,7 @@ else:
                             st.success(f"🎉 Replaced all bookings with {len(edited_gantt_df)} bookings from Gantt CSV!")
                             st.balloons()
                             st.rerun()
-                       
+                      
                         else:
                             if handle_conflicts == "Skip Conflicting":
                                 valid_bookings = []
@@ -593,7 +711,7 @@ else:
                                         valid_bookings.append(row)
                                     else:
                                         skipped += 1
-                               
+                              
                                 if valid_bookings:
                                     new_bookings_df = pd.DataFrame(valid_bookings)
                                     st.session_state.bookings = pd.concat([st.session_state.bookings, new_bookings_df], ignore_index=True)
@@ -602,11 +720,11 @@ else:
                                     st.rerun()
                                 else:
                                     st.error("❌ All bookings have conflicts. Nothing imported.")
-                           
+                          
                             else:
                                 remaining_bookings = st.session_state.bookings.copy()
                                 deleted_count = 0
-                               
+                              
                                 for idx, row in edited_gantt_df.iterrows():
                                     mask = (
                                         (remaining_bookings['reactor_id'] == row['reactor_id']) &
@@ -615,13 +733,13 @@ else:
                                     )
                                     deleted_count += mask.sum()
                                     remaining_bookings = remaining_bookings[~mask]
-                               
+                              
                                 st.session_state.bookings = pd.concat([remaining_bookings, edited_gantt_df], ignore_index=True)
                                 utils.save_data(st.session_state.bookings)
                                 st.success(f"✅ Imported {len(edited_gantt_df)} bookings (deleted {deleted_count} conflicts)")
                                 st.balloons()
                                 st.rerun()
-           
+          
             except Exception as e:
                 st.error(f"❌ Error processing Gantt CSV file: {e}")
                 import traceback
