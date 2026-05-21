@@ -173,36 +173,64 @@ else:
             with blk_c2:
                 blk_end = st.date_input("End Date", value=datetime.date.today() + datetime.timedelta(days=7), key="blk_end")
 
-            blk_reason = st.text_input(
-                "Reason (e.g. Calibration, Repair, Preventive Maintenance)",
-                key="blk_reason"
+            reason_choice = st.selectbox(
+                "Reason",
+                ["-- 선택 --", "고장/수리중", "Calibration 중", "기타"],
+                key="blk_reason_choice"
             )
+            if reason_choice == "기타":
+                blk_reason = st.text_input("기타 사유 입력", key="blk_reason_other").strip()
+            elif reason_choice == "-- 선택 --":
+                blk_reason = ""
+            else:
+                blk_reason = reason_choice
 
-            all_reactor_ids = sorted(st.session_state.inventory['id'].tolist(), key=utils.custom_sort_key)
+            is_vessel_block = False  # default; overridden in Ambr15 branch below
+            blk_category = st.radio(
+                "Reactor Category",
+                ["Bioreactor", "Ambr250", "Ambr15"],
+                horizontal=True,
+                key="blk_category",
+            )
+            all_ids = st.session_state.inventory['id'].tolist()
+            if blk_category == "Bioreactor":
+                filtered_ids = sorted([r for r in all_ids if not r.startswith("Ambr")], key=utils.custom_sort_key)
+            elif blk_category == "Ambr250":
+                filtered_ids = sorted([r for r in all_ids if r.startswith("Ambr250")])
+            else:  # Ambr15
+                filtered_ids = sorted([r for r in all_ids if r.startswith("Ambr15")])
+
             blk_reactors = st.multiselect(
-                "Select Reactor(s) to Block",
-                all_reactor_ids,
-                key="blk_reactors",
-                help="One block will be created per selected reactor."
+                f"Select {blk_category}(s) to Block",
+                filtered_ids,
+                key=f"blk_reactors_{blk_category}",
+                help="One block will be created per selected reactor.",
             )
 
             if blk_start and blk_end and blk_end < blk_start:
                 st.error("⚠️ End date must be on or after start date.")
             elif blk_reactors and blk_reason and blk_start and blk_end:
-                # Pre-validate conflicts (for warning display only — no Skip option)
                 current_bookings = st.session_state.get('bookings', utils.load_data())
-                conflicts = []
-                for rid in blk_reactors:
-                    if not utils.check_availability(rid, blk_start, blk_end, current_bookings):
-                        conflicts.append(rid)
-
-                if conflicts:
-                    st.warning(
-                        f"⚠️ {len(conflicts)} reactor(s) have existing bookings in this date range that will be DELETED: "
-                        f"{', '.join(conflicts)}"
-                    )
+                
+                if is_vessel_block:
+                    # Vessel blocks don't conflict with station bookings — no pre-check needed
+                    st.info(f"✅ {len(blk_reactors)} vessel block(s) will be created. "
+                            f"Station bookings remain unaffected.")
+                    conflicts = []
                 else:
-                    st.success(f"✅ All {len(blk_reactors)} reactor(s) available — no existing bookings to delete.")
+                    # Pre-validate conflicts (for warning display only — no Skip option)
+                    conflicts = []
+                    for rid in blk_reactors:
+                        if not utils.check_availability(rid, blk_start, blk_end, current_bookings):
+                            conflicts.append(rid)
+
+                    if conflicts:
+                        st.warning(
+                            f"⚠️ {len(conflicts)} reactor(s) have existing bookings in this date range that will be DELETED: "
+                            f"{', '.join(conflicts)}"
+                        )
+                    else:
+                        st.success(f"✅ All {len(blk_reactors)} reactor(s) available — no existing bookings to delete.")
 
                 if st.button("🔒 Create Block(s)", type="primary", key="blk_create_btn"):
                     bid_ts = str(int(datetime.datetime.now().timestamp()))
@@ -228,15 +256,18 @@ else:
                         deleted_n = int(mask.sum())
                         bookings_df = bookings_df[~mask]
 
-                    # Create one block per selected reactor (force = all selected)
+                    # Create one block per selected reactor
+                    # VBLOCK_ prefix for vessel-level (Ambr15), BLOCK_ for station-level
+                    prefix = "VBLOCK" if is_vessel_block else "BLOCK"
+                    stage_label = "VesselBlock" if is_vessel_block else "Block"
                     new_blocks = []
                     for i, rid in enumerate(blk_reactors):
                         new_blocks.append({
-                            "booking_id": f"BLOCK_{bid_ts}_{i}",
+                            "booking_id": f"{prefix}_{bid_ts}_{i}",
                             "reactor_id": rid,
                             "user": f"Admin ({auth.current_user()})",
                             "project": "수리중",
-                            "stage": "Block",
+                            "stage": stage_label,
                             "start": pd.to_datetime(blk_start),
                             "end": pd.to_datetime(blk_end),
                             "method": "N/A",
@@ -272,16 +303,21 @@ else:
                 st.info("No blocks active.")
             else:
                 blocks_df = current_bookings_view[
-                    current_bookings_view['booking_id'].astype(str).str.startswith('BLOCK_')
+                    current_bookings_view['booking_id'].astype(str).str.startswith('BLOCK_') |
+                    current_bookings_view['booking_id'].astype(str).str.startswith('VBLOCK_')
                 ].copy()
+                # Add Type column for clarity
+                blocks_df['Type'] = blocks_df['booking_id'].astype(str).apply(
+                    lambda b: 'Vessel' if b.startswith('VBLOCK_') else 'Station'
+                )
                 if blocks_df.empty:
                     st.info("No blocks active.")
                 else:
                     blocks_df['start'] = pd.to_datetime(blocks_df['start']).dt.strftime('%Y-%m-%d')
                     blocks_df['end'] = pd.to_datetime(blocks_df['end']).dt.strftime('%Y-%m-%d')
-                    blocks_show = blocks_df[['booking_id', 'reactor_id', 'start', 'end', 'user']].rename(columns={
+                    blocks_show = blocks_df[['booking_id', 'Type', 'reactor_id', 'start', 'end', 'user']].rename(columns={
                         'booking_id': 'Block ID',
-                        'reactor_id': 'Reactor',
+                        'reactor_id': 'Reactor / Vessel',
                         'start': 'Start',
                         'end': 'End',
                         'user': 'Created By',
