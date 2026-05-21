@@ -263,19 +263,46 @@ def get_method_options_for_scale(scale):
     }
     return method_map.get(scale, ['Fed-batch'])
 
-def get_vessel_count(reactor_id, vessels_used=None):
+def get_vessel_count(reactor_id, vessels_used=None, bookings_df=None, booking_start=None, booking_end=None):
     """
     Returns the number of physical vessels represented by one booking row.
-    If vessels_used is provided (user-specified), use that value.
-    Ambr15 stations default to 12 mini-bioreactors if not specified.
-    All other reactor types represent 1 vessel per booking row.
+    
+    Priority order:
+    1. If vessels_used is provided (user override), use that value.
+    2. For Ambr15 stations: default 12, minus any VBLOCK_ rows on this station
+       whose date range overlaps [booking_start, booking_end]. Time-aware: only
+       blocks active during the booking are subtracted.
+    3. All other reactor types = 1 vessel per booking row.
     """
     parts = reactor_id.split('-')
-    if len(parts) >= 3 and parts[0] == 'Ambr15' and parts[-1].startswith('S'):
-        if vessels_used is not None and not pd.isna(vessels_used):
-            return int(vessels_used)
-        return 12
-    return 1
+    is_ambr15_station = (len(parts) >= 3 and parts[0] == 'Ambr15' and parts[-1].startswith('S'))
+    
+    if not is_ambr15_station:
+        return 1
+    
+    if vessels_used is not None and not pd.isna(vessels_used):
+        return int(vessels_used)
+    
+    # Default 12 vessels per Ambr15 station
+    base_count = 12
+    
+    # Time-aware vessel block subtraction
+    if bookings_df is not None and not bookings_df.empty and booking_start is not None and booking_end is not None:
+        bs = pd.to_datetime(booking_start)
+        be = pd.to_datetime(booking_end)
+        # Match VBLOCKs on vessels of this station (e.g., Ambr15-EQ257-S1-V03 → parent Ambr15-EQ257-S1)
+        vblocks = bookings_df[
+            bookings_df['booking_id'].astype(str).str.startswith('VBLOCK_') &
+            bookings_df['reactor_id'].astype(str).str.startswith(reactor_id + '-V')
+        ].copy()
+        if not vblocks.empty:
+            vblocks['start'] = pd.to_datetime(vblocks['start'], errors='coerce')
+            vblocks['end'] = pd.to_datetime(vblocks['end'], errors='coerce')
+            # Span-aware overlap: block active during booking window
+            overlapping = vblocks[(vblocks['start'] <= be) & (vblocks['end'] >= bs)]
+            base_count -= len(overlapping)
+    
+    return max(base_count, 0)
 
 def calculate_project_cost(project_name, bookings_df, cost_matrix):
     """
@@ -303,9 +330,17 @@ def calculate_project_cost(project_name, bookings_df, cost_matrix):
     valid_scales = ['Ambr15', 'Ambr250', '2L', '200L']
     n_bookings = n_bookings[n_bookings['scale'].isin(valid_scales)]
    
-    # Compute per-row vessel count (1 for most, 12 for Ambr15 stations)
-    n_bookings['vessel_count'] = n_bookings['reactor_id'].apply(get_vessel_count)
-   
+   # Compute per-row vessel count (1 for most, 12-minus-blocks for Ambr15 stations)
+    # Pass full bookings_df + per-row start/end for time-aware vessel block subtraction
+    n_bookings['vessel_count'] = n_bookings.apply(
+        lambda row: get_vessel_count(
+            row['reactor_id'],
+            bookings_df=bookings_df,
+            booking_start=row['start'],
+            booking_end=row['end']
+        ),
+        axis=1
+    )
     breakdown = []
     total_cost = 0
    
@@ -387,6 +422,9 @@ def check_availability(reactor_id, start_date, end_date, bookings, allow_same_da
     check_end = pd.to_datetime(end_date)
    
     subset = bookings[bookings['reactor_id'] == reactor_id].copy()
+    # Exclude vessel-level blocks — they don't prevent station reservation
+    if 'booking_id' in subset.columns:
+        subset = subset[~subset['booking_id'].astype(str).str.startswith('VBLOCK_')]
     if subset.empty: return True
    
     subset['start'] = pd.to_datetime(subset['start'], errors='coerce')
