@@ -1,0 +1,10 @@
+﻿credentials:
+  usernames:
+    admin:
+      email: admin@example.com
+      first_name: Admin
+      last_name: User
+      password: "pbkdf2_sha256$200000$9e631a04a68acbc929d724cc31f13df9$f8bd24c58c96c46aee9342f7f1e1a9869915dee843cf8929e1255d01df2482b8"
+      roles:
+      - admin
+
