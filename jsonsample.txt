@@ -1,0 +1,44 @@
+{
+  "lang": "en",    --사용 언어(생략가능)
+  "titles": {  -- 각 컬럼 표현 타이틀
+    "common": {   --공통 컬럼
+      "labName": "Lab Name",
+      "floorLabel": "Floor",
+      "equipmentId": "Equipment ID",
+      "equipmentType": "Equipment Type",
+      "status": "Status",
+      "measuredAt": "Measured At"
+    },
+    "byType": { --타입별 컬럼
+      "pump": {
+        "flowRateM3h": "Flow Rate (m3/h)",
+        "headPressureBar": "Head Pressure (bar)",
+        "motorCurrentA": "Motor Current (A)"
+      }
+    }
+  },
+  "totalCount": 
+  "items": [ --실제 데이터
+    {
+      "labName": "Factory",
+      "floorLabel": "3F",
+      "equipmentId": "EQ-0001",
+      "equipmentType": "pump",
+      "status": "running",
+      "measuredAt": "2026-05-29T05:37:55.712Z",
+      "metrics": {
+        "flowRateM3h": 7111,
+        "headPressureBar": 1399,
+        "motorCurrentA": 10
+      }
+    }
+  ]
+}
+
+타이틀 매칭 방법
+item의 key가 title의 value 값으로 들어가서 매칭
+
+ex)
+ labname이라는 key는 Lab Name으로 표현 하고 Lab Name의 값은 Factory
+title : "labName": "Lab Name"
+item : "labName": "Factory",
