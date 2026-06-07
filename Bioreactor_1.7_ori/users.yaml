@@ -1,0 +1,30 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@example.com
+      first_name: Admin
+      last_name: User
+      password: "pbkdf2_sha256$200000$9e631a04a68acbc929d724cc31f13df9$9847c82cc2244dc598a0d9082490682075991a945aaf90ab11fe4f7e688a3c51"
+      roles:
+      - admin
+    세포주:
+      email: ""
+      first_name: 세포주
+      last_name: ""
+      password: "pbkdf2_sha256$200000$15b731e4ea753cfb94125c968ada1715$8822f8165b0377d4494065ff0eb013e52d23bd6b39fd257f7c37ec25c6bac3c9"
+      roles:
+      - editor
+    배양:
+      email: ""
+      first_name: 배양
+      last_name: ""
+      password: "pbkdf2_sha256$200000$cf6577751730dff02b304092d0bab80b$3027ececf462c6eacdaf59895c0322b2c5f1c782b7fa55b8ecb5abc831296f88"
+      roles:
+      - editor
+    MS1:
+      email: ""
+      first_name: MS1
+      last_name: ""
+      password: "pbkdf2_sha256$200000$fa9ba8eb9e8741115ba7988a10aa7c33$cf80662fccfcc6a48b62cfac8f5a0174ebaa069f37e5ded5da94e65731837cd3"
+      roles:
+      - editor
