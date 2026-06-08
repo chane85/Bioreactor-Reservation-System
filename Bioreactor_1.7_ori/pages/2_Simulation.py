@@ -28,4 +28,4 @@ _index = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 _v    = str(int(os.path.getmtime(_index))) if os.path.exists(_index) else '1'
 _user = urllib.parse.quote(auth.current_user() or '', safe='')
 
-components.iframe(f"http://localhost:8000?v={_v}&user={_user}", height=1100, scrolling=True)
+components.iframe(f"http://localhost:8565?v={_v}&user={_user}", height=1100, scrolling=True)
