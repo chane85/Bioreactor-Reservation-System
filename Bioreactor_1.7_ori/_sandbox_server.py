@@ -14,8 +14,8 @@ import urllib.request
 
 _THIS_DIR         = os.path.dirname(os.path.abspath(__file__))
 _BACKEND_DIR      = os.path.normpath(os.path.join(_THIS_DIR, '..', 'sandbox_v2', 'backend'))
-_BACKEND_PORT     = 8000
-_REQUIRED_VERSION = 7  # must match _API_VERSION in main.py
+_BACKEND_PORT     = 8565
+_REQUIRED_VERSION = 8  # must match _API_VERSION in main.py
 
 _proc = None  # module-level — persists across Streamlit reruns
 
