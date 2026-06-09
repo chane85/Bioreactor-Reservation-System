@@ -14,8 +14,8 @@ import urllib.request
 
 _THIS_DIR         = os.path.dirname(os.path.abspath(__file__))
 _BACKEND_DIR      = os.path.normpath(os.path.join(_THIS_DIR, '..', 'sandbox_v2', 'backend'))
-_BACKEND_PORT     = 8565
-_REQUIRED_VERSION = 8  # must match _API_VERSION in main.py
+_BACKEND_PORT     = 8561
+_REQUIRED_VERSION = 10  # must match _API_VERSION in main.py
 
 _proc = None  # module-level — persists across Streamlit reruns
 
@@ -120,7 +120,7 @@ def ensure_running():
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
     _proc = subprocess.Popen(
         [sys.executable, '-m', 'uvicorn', 'main:app',
-         '--host', '127.0.0.1', '--port', str(_BACKEND_PORT)],
+         '--host', '0.0.0.0', '--port', str(_BACKEND_PORT)],
         cwd=_BACKEND_DIR,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
