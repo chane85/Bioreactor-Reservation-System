@@ -6,7 +6,7 @@ Sandbox state lives entirely in process memory — no DB, no file persistence.
 Apply is the only operation that writes to disk.
 
 Run:
-    uvicorn main:app --reload --port 8565
+    uvicorn main:app --reload --port 8561
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ app = FastAPI(title="Bioreactor Sandbox API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:8565"],
+    allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:8561"],
     allow_methods=["*"],
     allow_headers=["*", "Authorization"],
 )
@@ -192,7 +192,7 @@ class AddBookingRequest(BaseModel):
         return self
 
 
-_API_VERSION = 8  # bump this any time new endpoints are added
+_API_VERSION = 10  # bump this any time new endpoints are added
 
 # ---------------------------------------------------------------------------
 # GET /api/version  — used by _sandbox_server.py to detect stale backends
