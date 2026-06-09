@@ -28,4 +28,11 @@ _index = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 _v    = str(int(os.path.getmtime(_index))) if os.path.exists(_index) else '1'
 _user = urllib.parse.quote(auth.current_user() or '', safe='')
 
-components.iframe(f"http://localhost:8565?v={_v}&user={_user}", height=1100, scrolling=True)
+# Use the same hostname the browser used to reach Streamlit,
+# so the iframe works both on localhost and on a remote server.
+try:
+    _host = st.context.headers.get("host", "localhost").split(":")[0]
+except Exception:
+    _host = "localhost"
+
+components.iframe(f"http://{_host}:8561?v={_v}&user={_user}", height=1100, scrolling=True)
