@@ -30,7 +30,7 @@ import utils
 import auth_utils
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-_DIST_DIR = os.path.normpath(os.path.join(_BACKEND_DIR, "..", "..", "sandbox_v2", "frontend", "dist"))
+_DIST_DIR = os.path.normpath(os.path.join(_BACKEND_DIR, "..", "frontend", "dist"))
 
 # ---------------------------------------------------------------------------
 # App + CORS
