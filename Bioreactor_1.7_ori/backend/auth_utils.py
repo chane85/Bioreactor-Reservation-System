@@ -8,7 +8,7 @@ import yaml
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get(
     "DATA_DIR",
-    os.path.normpath(os.path.join(_BACKEND_DIR, "..", "..", "Bioreactor_1.7_ori"))
+    os.path.normpath(os.path.join(_BACKEND_DIR, "..", "..", "Bioreactor_5"))
 )
 USERS_FILE = os.path.join(DATA_DIR, "users.yaml")
 
