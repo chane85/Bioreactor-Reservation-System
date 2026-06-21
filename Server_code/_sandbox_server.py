@@ -122,6 +122,7 @@ def ensure_running():
         [sys.executable, '-m', 'uvicorn', 'main:app',
          '--host', '0.0.0.0', '--port', str(_BACKEND_PORT)],
         cwd=_BACKEND_DIR,
+        env={**os.environ, 'DATA_DIR': _THIS_DIR},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         creationflags=flags,

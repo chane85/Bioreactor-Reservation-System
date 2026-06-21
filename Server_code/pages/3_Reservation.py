@@ -494,9 +494,9 @@ with tab_ambr:
                 bid = str(int(datetime.datetime.now().timestamp()))
                 new_rows = []
                 for item in final_booking_data:
-                    for unit in item['vessels']:
+                    for v_idx, unit in enumerate(item['vessels']):
                         new_rows.append({
-                            "booking_id": f"AMBR_{bid}_{item['step_idx']}",
+                            "booking_id": f"AMBR_{bid}_{item['step_idx']}_{v_idx}",
                             "reactor_id": unit,
                             "user": ambr_sme,
                             "project": ambr_proj,
