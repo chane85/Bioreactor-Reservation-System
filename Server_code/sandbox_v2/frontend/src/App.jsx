@@ -2,7 +2,12 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import Gantt from './Gantt';
 import * as api from './api';
 
-const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+// Same-origin by default, matching api.js. The old 'http://localhost:8000'
+// fallback sent the tab-close unlock beacon to a port nothing listens on, so
+// the sandbox lock was never released and the next user waited out the full
+// 30-minute timeout. An empty base resolves against the page that served the
+// app, so it follows the backend wherever it is served from.
+const BASE = import.meta.env.VITE_API_BASE || '';
 import { compareReactors } from './ganttUtils';
 import './App.css';
 
@@ -46,6 +51,7 @@ export default function App() {
   const [applyMsg,   setApplyMsg]  = useState(null);
   const [busy,      setBusy]      = useState(false);
   const [toast,     setToast]     = useState(null);
+  const [undoCount, setUndoCount] = useState(0);   // how many steps can still be reverted
 
   // ── Quick Reserve / Vacancy Search ───────────────────────────
   const [showSearch,      setShowSearch]      = useState(false);
@@ -71,6 +77,7 @@ export default function App() {
         try {
           const sb = await api.getSandboxState();
           setBookings(sb.bookings);
+          setUndoCount(sb.undo_count ?? 0);   // undo history survives a page refresh
           const df = await api.getDiff();
           setDiff(df);
         } catch { setBookings(d.bookings); }
@@ -127,6 +134,7 @@ export default function App() {
       sessionStorage.setItem('sandbox_user', userInput.trim());
       setLock(d.lock);
       setBookings(d.bookings);
+      setUndoCount(d.undo_count ?? 0);
       showToast('샌드박스 활성화 — 드래그로 일정 변경', 'success');
     } catch (e) {
       showToast(e.status === 423 ? (e.detail?.message ?? '샌드박스 사용 중') : '입장 실패', 'error');
@@ -141,6 +149,7 @@ export default function App() {
     const d = await api.getSchedule();
     setSchedule(d); setBookings(d.bookings); setLock(null);
     setUser(''); setUserInput(''); setDiff({ added: [], removed: [] }); setApplyMsg(null);
+    setUndoCount(0);
     setBusy(false);
     showToast('샌드박스 종료 — 변경사항 폐기');
   }
@@ -150,6 +159,7 @@ export default function App() {
     try {
       const d = await api.moveBooking(user, bookingId, newReactorId, newStart, newEnd);
       setBookings(d.bookings);
+      setUndoCount(d.undo_count ?? 0);
       const df = await api.getDiff(); setDiff(df);
     } catch (e) { showToast(String(e.detail ?? '이동 실패'), 'error'); }
   }, [user]);
@@ -160,7 +170,7 @@ export default function App() {
       for (const m of moves) {
         d = await api.moveBooking(user, m.bookingId, m.newReactorId, m.newStart, m.newEnd);
       }
-      if (d) setBookings(d.bookings);
+      if (d) { setBookings(d.bookings); setUndoCount(d.undo_count ?? 0); }
       const df = await api.getDiff(); setDiff(df);
     } catch (e) { showToast(String(e.detail ?? '이동 실패'), 'error'); }
   }, [user]);
@@ -169,8 +179,20 @@ export default function App() {
     try {
       const d = await api.deleteBooking(user, bookingId);
       setBookings(d.bookings);
+      setUndoCount(d.undo_count ?? 0);
       const df = await api.getDiff(); setDiff(df);
     } catch (e) { showToast(String(e.detail ?? '삭제 실패'), 'error'); }
+  }, [user]);
+
+  // Step back one sandbox change. Sandbox-only — never touches the live CSV.
+  const handleUndo = useCallback(async () => {
+    try {
+      const d = await api.undoChange(user);
+      setBookings(d.bookings);
+      setUndoCount(d.undo_count ?? 0);
+      const df = await api.getDiff(); setDiff(df);
+      showToast('마지막 변경을 되돌렸습니다', 'success');
+    } catch (e) { showToast(String(e.detail ?? '되돌리기 실패'), 'error'); }
   }, [user]);
 
   // Reset method when scale changes
@@ -210,6 +232,7 @@ export default function App() {
         srchStage, srchMethod, searchResults.start, searchResults.end
       );
       setBookings(d.bookings);
+      setUndoCount(d.undo_count ?? 0);
       const df = await api.getDiff(); setDiff(df);
       setSearchResults(null); setSelectedReactors([]);
       showToast(`${d.n_added}개 예약이 샌드박스에 추가되었습니다`, 'success');
@@ -240,7 +263,7 @@ export default function App() {
       sessionStorage.removeItem('sandbox_user');
       const fresh = await api.getSchedule();
       setSchedule(fresh); setBookings(fresh.bookings);
-      setLock(null); setUser(''); setDiff({ added: [], removed: [] });
+      setLock(null); setUser(''); setDiff({ added: [], removed: [] }); setUndoCount(0);
     } catch (e) {
       if (e.status === 409)      setApplyMsg({ type: 'conflict', text: '충돌 발생 — 적용 취소:', conflicts: e.detail?.conflicts });
       else if (e.status === 401) setApplyMsg({ type: 'error', text: '인증 실패' });
@@ -343,6 +366,14 @@ export default function App() {
             <span className="sandbox-badge">✏️ {lock.user}</span>
             {inSandbox && (
               <>
+                <button
+                  className="btn"
+                  onClick={handleUndo}
+                  disabled={busy || undoCount === 0}
+                  title={undoCount === 0 ? '되돌릴 변경이 없습니다' : `마지막 변경을 되돌립니다 (${undoCount}단계 가능)`}
+                >
+                  ↩ 되돌리기{undoCount > 0 ? ` (${undoCount})` : ''}
+                </button>
                 <button className="btn" onClick={() => setShowDiff(v => !v)}>
                   {nChanges > 0 ? `📋 변경 ${nChanges}건` : '📋 변경 없음'}
                 </button>

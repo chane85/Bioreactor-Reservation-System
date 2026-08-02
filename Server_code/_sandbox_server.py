@@ -13,9 +13,33 @@ import time
 import urllib.request
 
 _THIS_DIR         = os.path.dirname(os.path.abspath(__file__))
-_BACKEND_DIR      = os.path.normpath(os.path.join(_THIS_DIR, '..', 'sandbox_v2', 'backend'))
+
+
+def _find_backend_dir() -> str:
+    """Locate sandbox_v2/backend, whether it sits beside this file or one level up.
+
+    Repo layout  : Server_code/sandbox_v2/backend  (sibling of this file)
+    Server layout: <app_root>/sandbox_v2/backend   (one level above this file)
+    """
+    # Server layout is checked FIRST so deployed behaviour is unchanged: there,
+    # sandbox_v2 is a sibling of Server_code and backend/utils.py resolves
+    # DATA_DIR to <app_root>/Bioreactor_5. Only fall back to the in-repo copy
+    # when that parent path does not exist.
+    candidates = [
+        os.path.normpath(os.path.join(_THIS_DIR, '..', 'sandbox_v2', 'backend')),
+        os.path.normpath(os.path.join(_THIS_DIR, 'sandbox_v2', 'backend')),
+    ]
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    raise RuntimeError(
+        'sandbox_v2/backend not found. Looked in:\n  ' + '\n  '.join(candidates)
+    )
+
+
+_BACKEND_DIR      = _find_backend_dir()
 _BACKEND_PORT     = 8561
-_REQUIRED_VERSION = 10  # must match _API_VERSION in main.py
+_REQUIRED_VERSION = 11  # must match _API_VERSION in main.py
 
 _proc = None  # module-level — persists across Streamlit reruns
 

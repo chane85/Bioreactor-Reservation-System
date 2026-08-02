@@ -1,0 +1,12 @@
+# Live reservation data — belongs on the server (DATA_DIR), never in the repo.
+# Scoped to Server_code/ so the historical snapshot folders, which are already
+# tracked, are unaffected.
+Server_code/Bioreactor_reservation.csv
+
+# Runtime output written next to the data file: pending/applied simulation
+# diffs, rolling backups, and the audit log.
+Server_code/simulations/
+
+# Python bytecode
+__pycache__/
+*.pyc

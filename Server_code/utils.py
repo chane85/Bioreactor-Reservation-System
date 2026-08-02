@@ -6,9 +6,16 @@ import os
 import re
 
 # --- CONFIGURATION ---
-DATA_FILE = "Bioreactor_reservation.csv"
+# DATA_DIR mirrors sandbox_v2/backend/utils.py so the Streamlit pages and the
+# sandbox backend read and write the same files instead of two separate copies.
+# Default "" preserves the historical launch-directory-relative behaviour:
+# os.path.join("", "x") == "x". Nothing changes unless DATA_DIR is set.
+DATA_DIR = os.environ.get("DATA_DIR", "")
+
+DATA_FILE = os.path.join(DATA_DIR, "Bioreactor_reservation.csv")
+# COST_FILE is intentionally NOT anchored to DATA_DIR — the backend has no
+# equivalent constant, so anchoring it would move a file the backend never reads.
 COST_FILE = "배치_단가.csv"
-ADMIN_PASSWORD = "bio135"
 
 # --- COLORS ---
 PROJECT_BG_MAP = {
@@ -288,7 +295,9 @@ def get_vessel_count(reactor_id, vessels_used=None, bookings_df=None, booking_st
         return 1
     
     if vessels_used is not None and not pd.isna(vessels_used):
-        return int(vessels_used)
+        # CSV round-trips can store this as "12.0" (float-formatted) and load_data
+        # reads every column as str, so int() alone raises ValueError. float() first.
+        return int(float(vessels_used))
     
     # Default 12 vessels per Ambr15 station
     base_count = 12
@@ -767,10 +776,10 @@ def create_gantt_chart(reactors, reactor_y_map, bookings_df, extra_shapes=None, 
 
 
 # --- SIMULATION FOLDER PATHS ---
-SIM_PENDING_DIR = os.path.join("simulations", "pending")
-SIM_APPLIED_DIR = os.path.join("simulations", "applied")
-SIM_BACKUP_DIR = os.path.join("simulations", "backups")
-AUDIT_LOG_FILE = os.path.join("simulations", "audit_log.csv")
+SIM_PENDING_DIR = os.path.join(DATA_DIR, "simulations", "pending")
+SIM_APPLIED_DIR = os.path.join(DATA_DIR, "simulations", "applied")
+SIM_BACKUP_DIR = os.path.join(DATA_DIR, "simulations", "backups")
+AUDIT_LOG_FILE = os.path.join(DATA_DIR, "simulations", "audit_log.csv")
 MAX_BACKUPS = 10
 
 def _ensure_sim_dirs():

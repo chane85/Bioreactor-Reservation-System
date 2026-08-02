@@ -48,10 +48,13 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 LOCK_TIMEOUT_MINUTES = 30  # auto-release after N minutes of inactivity
 
+MAX_UNDO_STEPS = 50  # bounds memory; each entry is a copy of sandbox_df
+
 class _State:
     lock: Optional[dict] = None           # {user, acquired_at, last_activity}
     sandbox_df: Optional[pd.DataFrame] = None
     snapshot_df: Optional[pd.DataFrame] = None  # live data at lock acquisition time
+    history: Optional[list] = None        # past sandbox_df states, oldest first
 
 _s = _State()
 _state_lock = threading.Lock()  # guards all mutations of _s
@@ -76,12 +79,33 @@ def _check_and_release_expired_lock():
             return
         elapsed = (datetime.datetime.now() - _s.lock["last_activity"]).total_seconds()
         if elapsed > LOCK_TIMEOUT_MINUTES * 60:
-            _s.lock = _s.sandbox_df = _s.snapshot_df = None
+            _s.lock = _s.sandbox_df = _s.snapshot_df = _s.history = None
 
 
 def _release_lock():
     with _state_lock:
-        _s.lock = _s.sandbox_df = _s.snapshot_df = None
+        _s.lock = _s.sandbox_df = _s.snapshot_df = _s.history = None
+
+
+def _push_history():
+    """Snapshot sandbox_df before a mutation so it can be undone.
+
+    Called at the top of every endpoint that changes sandbox_df. Oldest entries
+    are dropped past MAX_UNDO_STEPS so a long editing session cannot grow
+    without bound.
+    """
+    with _state_lock:
+        if _s.sandbox_df is None:
+            return
+        if _s.history is None:
+            _s.history = []
+        _s.history.append(_s.sandbox_df.copy())
+        if len(_s.history) > MAX_UNDO_STEPS:
+            del _s.history[0:len(_s.history) - MAX_UNDO_STEPS]
+
+
+def _undo_count() -> int:
+    return len(_s.history) if _s.history else 0
 
 
 def _touch_lock():
@@ -162,6 +186,9 @@ class ApplyRequest(BaseModel):
 class UnlockRequest(BaseModel):
     user: str
 
+class UndoRequest(BaseModel):
+    user: str
+
 class FindAvailableRequest(BaseModel):
     scale: str
     start_date: str   # YYYY-MM-DD
@@ -191,7 +218,8 @@ class AddBookingRequest(BaseModel):
         return self
 
 
-_API_VERSION = 10  # bump this any time new endpoints are added
+_API_VERSION = 11  # bump this any time new endpoints are added
+                   # (must match _REQUIRED_VERSION in _sandbox_server.py)
 
 # ---------------------------------------------------------------------------
 # GET /api/version  — used by _sandbox_server.py to detect stale backends
@@ -245,11 +273,13 @@ def claim_lock(req: LockRequest):
     live          = utils.load_data()
     _s.sandbox_df = live.copy()
     _s.snapshot_df = live.copy()
+    _s.history    = []   # undo stack is per sandbox session
 
     return {
-        "status":   "acquired",
-        "lock":     _lock_info(),
-        "bookings": _df_to_records(_s.sandbox_df),
+        "status":     "acquired",
+        "lock":       _lock_info(),
+        "bookings":   _df_to_records(_s.sandbox_df),
+        "undo_count": 0,
     }
 
 
@@ -281,8 +311,9 @@ def get_sandbox_bookings():
         raise HTTPException(status_code=423, detail="No active sandbox lock")
 
     return {
-        "bookings": _df_to_records(_s.sandbox_df),
-        "lock":     _lock_info(),
+        "bookings":   _df_to_records(_s.sandbox_df),
+        "lock":       _lock_info(),
+        "undo_count": _undo_count(),
     }
 
 
@@ -305,6 +336,8 @@ def move_booking(req: MoveRequest):
 
     row = _s.sandbox_df[mask].iloc[0].to_dict()
 
+    _push_history()
+
     # Remove original
     _s.sandbox_df = _s.sandbox_df[~mask].copy()
 
@@ -326,6 +359,7 @@ def move_booking(req: MoveRequest):
         "status":         "moved",
         "new_booking_id": new_row["booking_id"],
         "bookings":       _df_to_records(_s.sandbox_df),
+        "undo_count":     _undo_count(),
     }
 
 
@@ -345,12 +379,40 @@ def delete_booking(req: DeleteRequest):
     if not mask.any():
         raise HTTPException(status_code=404, detail=f"Booking {req.booking_id} not found in sandbox")
 
+    _push_history()
+
     _s.sandbox_df = _s.sandbox_df[~mask].copy()
 
     _touch_lock()
     return {
-        "status":   "deleted",
-        "bookings": _df_to_records(_s.sandbox_df),
+        "status":     "deleted",
+        "bookings":   _df_to_records(_s.sandbox_df),
+        "undo_count": _undo_count(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/sandbox/undo  — step back one change
+# ---------------------------------------------------------------------------
+@app.post("/api/sandbox/undo")
+def undo_change(req: UndoRequest):
+    _check_and_release_expired_lock()
+
+    if _s.lock is None:
+        raise HTTPException(status_code=423, detail="No active sandbox lock")
+    if _s.lock["user"] != req.user:
+        raise HTTPException(status_code=403, detail="Lock held by a different user")
+    if not _s.history:
+        raise HTTPException(status_code=409, detail="되돌릴 변경이 없습니다")
+
+    with _state_lock:
+        _s.sandbox_df = _s.history.pop()
+
+    _touch_lock()
+    return {
+        "status":     "reverted",
+        "bookings":   _df_to_records(_s.sandbox_df),
+        "undo_count": _undo_count(),
     }
 
 
@@ -458,18 +520,32 @@ def apply_sandbox(req: ApplyRequest, request: Request):
     if user_added_ids and _s.sandbox_df is not None and not _s.sandbox_df.empty:
         added_rows = _s.sandbox_df[_s.sandbox_df["booking_id"].astype(str).isin(user_added_ids)]
         for _, row in added_rows.iterrows():
+            row_id = str(row["booking_id"])
             # Exclude this specific booking from the check temp (defensive — shouldn't be in live)
-            check_temp = temp_live[temp_live["booking_id"].astype(str) != str(row["booking_id"])]
+            live_others = temp_live[temp_live["booking_id"].astype(str) != row_id]
+            # Overlap is allowed while dragging in the sandbox, but never on apply.
+            # The batch itself must be checked too: two bookings moved in the same
+            # session exist only in sandbox_df, so comparing against live data alone
+            # would let them overlap each other and both get written to disk.
+            batch_others = added_rows[added_rows["booking_id"].astype(str) != row_id]
+
             available = utils.check_availability(
-                str(row["reactor_id"]), row["start"], row["end"], check_temp
+                str(row["reactor_id"]), row["start"], row["end"], live_others
             )
-            if not available:
+            clashes_in_batch = not utils.check_availability(
+                str(row["reactor_id"]), row["start"], row["end"], batch_others
+            )
+
+            if not available or clashes_in_batch:
                 conflicts.append({
-                    "booking_id": str(row["booking_id"]),
+                    "booking_id": row_id,
                     "reactor_id": str(row["reactor_id"]),
                     "start":      str(row["start"])[:10],
                     "end":        str(row["end"])[:10],
                     "message":    (
+                        f"{row['reactor_id']} overlaps another booking in this change set "
+                        f"{str(row['start'])[:10]} ~ {str(row['end'])[:10]}"
+                        if clashes_in_batch else
                         f"{row['reactor_id']} is no longer available "
                         f"{str(row['start'])[:10]} ~ {str(row['end'])[:10]}"
                     ),
@@ -577,13 +653,16 @@ def add_booking(req: AddBookingRequest):
             detail={"message": f"{', '.join(conflicts)} 에 충돌이 있습니다", "conflicts": conflicts},
         )
 
+    _push_history()
+
     _s.sandbox_df = pd.concat([_s.sandbox_df, pd.DataFrame(new_rows)], ignore_index=True)
     _touch_lock()
 
     return {
-        "status":   "added",
-        "n_added":  len(new_rows),
-        "bookings": _df_to_records(_s.sandbox_df),
+        "status":     "added",
+        "n_added":    len(new_rows),
+        "bookings":   _df_to_records(_s.sandbox_df),
+        "undo_count": _undo_count(),
     }
 
 

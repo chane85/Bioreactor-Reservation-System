@@ -20,6 +20,7 @@ export const getSandboxState   = ()                                     => reque
 export const moveBooking       = (user, booking_id, new_reactor_id, new_start, new_end) =>
   request('POST', '/api/sandbox/move',   { user, booking_id, new_reactor_id, new_start, new_end });
 export const deleteBooking     = (user, booking_id)                     => request('POST',   '/api/sandbox/delete', { user, booking_id });
+export const undoChange        = (user)                                 => request('POST',   '/api/sandbox/undo', { user });
 export const getDiff           = ()                                     => request('GET',    '/api/sandbox/diff');
 export const applyChanges      = (user, adminUser, adminPassword)       => request('POST',   '/api/sandbox/apply',  { user }, { Authorization: 'Basic ' + btoa(`${adminUser}:${adminPassword}`) });
 export const unlockSandbox     = (user)                                 => request('POST',   '/api/sandbox/unlock', { user });

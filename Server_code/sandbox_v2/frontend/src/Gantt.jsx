@@ -171,7 +171,7 @@ function Gantt({ bookings, reactors, colors, user, onMove, onMoveMultiple, onDel
       if (!wasSel) setSelectedIds(new Set([b.booking_id]));
 
       const rawDayShift = Math.round(dx / DAY_WIDTH);
-      const rowShift    = isMulti ? 0 : Math.round(dy / H); // no vertical shift for multi
+      const rawRowShift = Math.round(dy / H);
 
       // Clamp dayShift so no bar exits the view bounds
       let clampedShift = rawDayShift;
@@ -183,7 +183,34 @@ function Gantt({ bookings, reactors, colors, user, onMove, onMoveMultiple, onDel
           minAllowed = Math.max(minAllowed, -fromStart);
           maxAllowed = Math.min(maxAllowed, toEnd);
         }
-        clampedShift = Math.max(minAllowed, Math.min(maxAllowed, rawDayShift));
+        // A bar that already overhangs the view makes minAllowed positive or
+        // maxAllowed negative. Clamping straight to those bounds would force a
+        // move the user never asked for — and in the opposite direction. Fold
+        // the bounds toward 0 so the clamp can only shorten the drag, never
+        // reverse it: a bar hanging off an edge simply cannot travel further
+        // that way, but can still be dragged back into view.
+        const upper = Math.max(0, maxAllowed);
+        const lower = Math.min(0, minAllowed);
+        clampedShift = Math.max(lower, Math.min(upper, rawDayShift));
+      }
+
+      // Clamp rowShift the same way, so a multi-selection moves up/down as one
+      // block. One shared shift (rather than clamping each bar separately) keeps
+      // the bars' relative row spacing intact: if any selected bar would run off
+      // the top or bottom of the reactor list, the whole group stops there
+      // instead of collapsing onto the boundary row.
+      let rowShift = rawRowShift;
+      if (rawRowShift !== 0) {
+        let minAllowed = -Infinity, maxAllowed = Infinity;
+        for (const bk of dragBookings) {
+          const idx = reactors.findIndex(r => r.id === bk.reactor_id);
+          if (idx < 0) continue;  // booking on a reactor not in this scope
+          minAllowed = Math.max(minAllowed, -idx);
+          maxAllowed = Math.min(maxAllowed, (reactors.length - 1) - idx);
+        }
+        const rowUpper = Math.max(0, maxAllowed);
+        const rowLower = Math.min(0, minAllowed);
+        rowShift = Math.max(rowLower, Math.min(rowUpper, rawRowShift));
       }
 
       if (clampedShift === 0 && rowShift === 0) return;
@@ -345,8 +372,9 @@ function Gantt({ bookings, reactors, colors, user, onMove, onMoveMultiple, onDel
     return barsToShow.map(bk => {
       const ridx = reactors.findIndex(r => r.id === bk.reactor_id);
       const left = (daysBetween(viewStart, bk.start) * DAY_WIDTH) + deltaX + LABEL_WIDTH - scrollLeft;
-      // For multi-drag: no vertical shift (row locked); single-drag: follow cursor vertically
-      const top  = (ridx * H) + (isMulti ? 0 : deltaY) + 60 - scrollTop;
+      // Every dragged bar follows the cursor vertically, multi-selection included,
+      // so the ghost previews the row the group will actually land on.
+      const top  = (ridx * H) + deltaY + 60 - scrollTop;
       const proj = normalizeProject(bk.project);
       const bg   = colors?.bg?.[proj]   ?? '#808080';
       const fg   = colors?.font?.[proj] ?? '#000';
